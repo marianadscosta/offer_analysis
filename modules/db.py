@@ -1,6 +1,6 @@
 from pymongo import MongoClient
 import pandas as pd
-from . import config
+import config
 
 
 def load_data(start_date: str, end_date: str, line_ids: list[int] = None) -> pd.DataFrame:

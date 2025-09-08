@@ -1,7 +1,6 @@
 import config
 from modules import  db, preprocessing, aggregations as agg, plots, outputs
 
-
 def main():
     # -------------------------
     # Load raw data from Mongo
