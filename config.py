@@ -15,7 +15,7 @@ OUTPUT_PLOT_EXTENSIONS = OUTPUT_DIR / "extensions.png"
 OUTPUT_PLOT_DAYTYPE = OUTPUT_DIR / "daytype_bar.png"
 
 # Analysis period
-START_DATE = "20240101"
+START_DATE = "20250901"
 END_DATE = "20250930"
 
 # MongoDB connection
@@ -24,8 +24,7 @@ DB_NAME = "production"
 COLLECTION_NAME = "rides"
 
 # Optional filter
-LINE_IDS = [4701 
-]
+LINE_IDS = []
 
 # Ensure outputs dir exists
 OUTPUT_DIR.mkdir(exist_ok=True)

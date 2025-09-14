@@ -21,9 +21,6 @@ def main():
     # -------------------------
     df_monthly = agg.agg_monthly_summary(df)
     df_daytype_month_avg = agg.agg_daytype_monthly_avg(df)
-    df_daytype_pivot = agg.agg_daytype_pivot(df_daytype_month_avg)
-    df_totals = agg.agg_totals(df)
-    df_daytype_total = agg.agg_daytype_total(df)
     df_daytype_date = agg.agg_daytype_date(df)
     df_lineid = agg.agg_lineid_summary(df)
 
@@ -33,13 +30,10 @@ def main():
     outputs.save_to_excel(
         config.OUTPUT_EXCEL,
         {
-            "Daytype Averages Monthly": df_daytype_month_avg,
-            "Daytype Averages Pivot": df_daytype_pivot,
-            "Daytype Averages Total": df_daytype_total,
-            "Daytype by Date": df_daytype_date,
-            "Monthly Summary": df_monthly,
-            "Totals": df_totals,
-            "Rides per LineID": df_lineid,
+            "Circulacoes_por Dia Tipo": df_daytype_month_avg,
+            "Circulacoes_por Data": df_daytype_date,
+            "Total por mês": df_monthly,
+            "Circulacoes por Linha": df_lineid,
         }
     )
 
