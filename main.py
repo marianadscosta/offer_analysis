@@ -3,7 +3,7 @@ from modules import  db, preprocessing, aggregations as agg, plots, outputs
 
 def main():
     # -------------------------
-    # Load raw data from Mongo
+    # Load raw data from Mongo 
     # -------------------------
     df = db.load_data(
         start_date=config.START_DATE,
