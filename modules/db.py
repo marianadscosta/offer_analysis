@@ -59,9 +59,10 @@ def load_data(start_date: str, end_date: str, line_ids: list[int] = None) -> pd.
     df.loc[(df["hour"] >= 4) & (df["hour"] < 6), "period_of_day"] = "4-6"
     df.loc[(df["hour"] >= 6) & (df["hour"] < 9), "period_of_day"] = "6-9"
     df.loc[(df["hour"] >= 9) & (df["hour"] < 13), "period_of_day"] = "9-13"
+    df.loc[(df["hour"] >= 13) & (df["hour"] < 14), "period_of_day"] = "13-14"
     df.loc[(df["hour"] >= 14) & (df["hour"] < 17), "period_of_day"] = "14-17"
     df.loc[(df["hour"] >= 17) & (df["hour"] < 20), "period_of_day"] = "17-20"
-    df.loc[(df["hour"] >= 20) & (df["hour"] < 0), "period_of_day"] = "20-0"
+    df.loc[(df["hour"] >= 20) & (df["hour"] < 24), "period_of_day"] = "20-0"
     df.loc[(df["hour"] >= 0) & (df["hour"] < 4), "period_of_day"] = "0-4"
     
     return df

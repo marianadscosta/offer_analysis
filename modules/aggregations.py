@@ -66,7 +66,7 @@ def agg_daytype_total(df: pd.DataFrame) -> pd.DataFrame:
 
 def agg_daytype_date(df: pd.DataFrame) -> pd.DataFrame:
     """Daily breakdown by day_type."""
-    return aggregate(df, ["agency_id", "operational_date", "day_type", "period"], {
+    return aggregate(df, ["agency_id", "line_id", "operational_date", "day_type", "period"], {
         "ride_count": "sum"
     }).rename(columns={"ride_count": "rides"})
 
