@@ -14,11 +14,12 @@ def save_to_excel(path: str, sheets: dict[str, pd.DataFrame]) -> None:
     """
     with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
         for sheet_name, df in sheets.items():
+            if df is None or df.empty:
+                print(f"⚠️ Skipping empty sheet: {sheet_name}")
+                continue
             df.to_excel(writer, index=False, sheet_name=sheet_name)
 
-            # Formatting
             worksheet = writer.sheets[sheet_name]
-            worksheet.freeze_panes(1, 0)  # freeze header row
+            worksheet.freeze_panes(1, 0)
             worksheet.set_column(0, len(df.columns) - 1, 15)
-
     print(f"✅ Excel saved to {path}")

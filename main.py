@@ -1,5 +1,6 @@
 import config
-from modules import  db, preprocessing, aggregations as agg, plots, outputs
+from modules import db, preprocessing, aggregations as agg, plots, outputs
+import pandas as pd
 
 def main():
     # -------------------------
@@ -15,7 +16,7 @@ def main():
     # Preprocess & join with daytypes
     # -------------------------
     df = preprocessing.prepare(df, config.DAYTYPE_FILE)
-
+    
     # -------------------------
     # Aggregations
     # -------------------------
@@ -23,6 +24,23 @@ def main():
     df_daytype_month_avg = agg.agg_daytype_monthly_avg(df)
     df_daytype_date = agg.agg_daytype_date(df)
     df_lineid = agg.agg_lineid_summary(df)
+
+    # -------------------------
+    # Validations per trip/day
+    # -------------------------
+    df_validations = db.load_validations(
+        start_date=config.START_DATE,
+        end_date=config.END_DATE,
+        line_ids=config.LINE_IDS
+    )
+    
+    df_problematic = db.find_problematic_trips(df_validations)
+    df_problematic = preprocessing.prepare_to_zeros(df_problematic, config.DAYTYPE_FILE)
+
+    if df_problematic is not None and not df_problematic.empty:
+        suspect_trips = agg.create_suspect_trips(df_problematic)
+    else:
+        suspect_trips = pd.DataFrame()
 
     # -------------------------
     # Save Excel
@@ -34,6 +52,9 @@ def main():
             "Circulacoes_por Data": df_daytype_date,
             "Total por mês": df_monthly,
             "Circulacoes por Linha": df_lineid,
+            "Validacoes por Viagem": df_validations,
+            "Viagens Problematicas": df_problematic, 
+            "Viagens Problematicas_v1": suspect_trips, 
         }
     )
 

@@ -66,8 +66,9 @@ def agg_daytype_total(df: pd.DataFrame) -> pd.DataFrame:
 
 def agg_daytype_date(df: pd.DataFrame) -> pd.DataFrame:
     """Daily breakdown by day_type."""
-    return aggregate(df, ["agency_id", "line_id", "operational_date", "day_type", "period"], {
-        "ride_count": "sum"
+    return aggregate(df, ["agency_id", "line_id", "pattern_id","operational_date", "day_type", "period"], {
+        "ride_count": "sum",
+        "passengers_observed": "sum"
     }).rename(columns={"ride_count": "rides"})
 
 
@@ -95,3 +96,13 @@ def agg_lineid_daytype_period(df: pd.DataFrame) -> pd.DataFrame:
     return aggregate(df, ["line_id", "day_type", "period"], {
         "ride_count": "sum"
     }).rename(columns={"ride_count": "rides"})
+
+def create_suspect_trips(df: pd.DataFrame) -> pd.DataFrame:
+    required_cols = [
+        "operational_date", "day_type", "period", "month", "agency_id",
+ "pattern_id", "trip_id", "start_time", "validations", "avg_validations",
+        "driver_ids", "vehicle_ids"    ]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns in dataframe: {missing}")
+    return df[required_cols].copy()
