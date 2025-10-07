@@ -4,7 +4,7 @@ import pandas as pd
 
 def main():
     # -------------------------
-    # Load raw data from Mongo
+    # Load raw data from Mongo 
     # -------------------------
     df = db.load_data(
         start_date=config.START_DATE,
