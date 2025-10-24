@@ -9,12 +9,15 @@ Folhas: 'extension_per_municipality' e 'paragens_pro municipio'
 Regras:
 - Áreas 1–3: preferir YEAR (mesmo zipado). Se não houver YEAR, usar REF.
 - Área 4: forçar REF.
-- Concelhos.shp e bridges.shp: procurar no repositório offer_analysis\inputs (com aviso se fallback).
+- Concelhos.shp e bridges.shp: descarregar diretamente do GitHub (sem cache local).
 - SHPs gerados passam a incluir SEMPRE 'pattern_id' (e há recuperação a partir de trips.txt se faltar).
 """
 
 import re
+import os
+import io
 import zipfile
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, List
 from datetime import datetime
@@ -23,7 +26,81 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import LineString
 
-# Parâmetros principais
+# NEW: helpers de download direto do GitHub (raw.githubusercontent.com)
+
+try:
+    import requests
+except ImportError:
+    requests = None
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
+
+RAW_BASE = "https://raw.githubusercontent.com/marianadscosta/offer_analysis/main/inputs"
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+def _download_bytes(url: str, timeout: int = 30) -> bytes:
+    """
+    Tenta obter bytes via requests; caso não exista, usa urllib.
+    Lança RuntimeError com mensagem clara em caso de falha.
+    """
+    try:
+        if requests is not None:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code != 200:
+                raise RuntimeError(f"HTTP {r.status_code}")
+            return r.content
+        else:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+    except (HTTPError, URLError, Exception) as e:
+        raise RuntimeError(str(e)) from e
+
+def _fetch_shapefile_to_temp(basename: str) -> str:
+    """
+    Descarrega os componentes obrigatórios de um Shapefile (basename.*) para um diretório temporário
+    e devolve o caminho para o .shp dentro desse diretório.
+    Componentes obrigatórios: .shp .shx .dbf
+    Opcionais (tentados): .prj .cpg
+    Em falha de QUALQUER obrigatório: interrompe com mensagem específica, como pedido.
+    """
+    required_exts = [".shp", ".shx", ".dbf"]
+    optional_exts = [".prj", ".cpg"]
+
+    tmpdir = tempfile.mkdtemp(prefix=f"tmp_{basename}_")
+    ok_required = []
+
+    for ext in required_exts:
+        url = f"{RAW_BASE}/{basename}{ext}"
+        try:
+            data = _download_bytes(url)
+            with open(os.path.join(tmpdir, f"{basename}{ext}"), "wb") as f:
+                f.write(data)
+            ok_required.append(ext)
+        except Exception:
+            # Mensagem de erro clara e imediata, sem fallback
+            raise SystemExit(
+                f"❌ Erro: Não foi possível descarregar '{basename}{ext}' do GitHub.\n"
+                f"   Verifica a tua ligação à internet ou o URL do repositório.\n"
+                f"   Tentado: {url}"
+            )
+
+    # Tenta opcionais (não interrompe se falhar)
+    for ext in optional_exts:
+        url = f"{RAW_BASE}/{basename}{ext}"
+        try:
+            data = _download_bytes(url)
+            with open(os.path.join(tmpdir, f"{basename}{ext}"), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass  # prossegue sem .prj/.cpg
+
+    shp_path = os.path.join(tmpdir, f"{basename}.shp")
+    return shp_path
+
+# Parâmetros
 BASE = Path(r"C:\Users\MargaridaDias\TML\Gestão de Contratos - Documents\General\ISO\1 Análise de Planos")
 AREAS = [f"Área {i}" for i in (1, 2, 3, 4)]
 
@@ -43,63 +120,10 @@ DATE_TAG = OVERRIDE_DATE_TAG if OVERRIDE_DATE_TAG else DEFAULT_DATE_TAG
 OUT_DAY_DIR = OUT_BASE_DIR / DATE_TAG
 OUT_DAY_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def log(msg: str) -> None:
-    print(msg, flush=True)
-
-
-# Inputs fixos (repositório + fallback)
-PREFERRED_REPO_INPUTS_DIR = Path(r"C:\Users\MargaridaDias\Documents\Developer\offer_analysis\inputs")
-THIS_FILE_DIR = Path(__file__).resolve().parent
-LOCAL_INPUTS_DIR = THIS_FILE_DIR / "inputs"
-
-CONCELHOS_FILENAME = "Concelhos.shp"
-BRIDGES_FILENAME = "bridges.shp"
-
-
-def discover_input(filename: str) -> Path:
-    """
-    Ordem de procura:
-    1) PREFERRED_REPO_INPUTS_DIR (preferido)
-    2) LOCAL_INPUTS_DIR (inputs/ ao lado do script)
-    3) Procura recursiva no repo preferido
-    4) Procura recursiva local
-    """
-    # 1) Repositório escolhido
-    candidate = PREFERRED_REPO_INPUTS_DIR / filename
-    if candidate.exists():
-        log(f"    [INPUT] '{filename}' -> {candidate}")
-        return candidate
-
-    # 2) inputs/ local
-    candidate = LOCAL_INPUTS_DIR / filename
-    if candidate.exists():
-        log(f"    [FALLBACK] '{filename}' -> {candidate} (inputs ao lado do script)")
-        return candidate
-
-    # 3) procura recursiva no repo
-    if PREFERRED_REPO_INPUTS_DIR.exists():
-        hits = list(PREFERRED_REPO_INPUTS_DIR.rglob(filename))
-        if hits:
-            log(f"    [FALLBACK] '{filename}' (procura recursiva repo preferido) -> {hits[0]}")
-            return hits[0]
-
-    # 4) procura recursiva local
-    hits = list(THIS_FILE_DIR.rglob(filename))
-    if hits:
-        log(f"    [FALLBACK] '{filename}' (procura recursiva local) -> {hits[0]}")
-        return hits[0]
-
-    raise FileNotFoundError(
-        f"Input obrigatório em falta: {filename}. "
-        f"Coloca-o em '{PREFERRED_REPO_INPUTS_DIR}' (preferido) ou em '{LOCAL_INPUTS_DIR}'."
-    )
-
 # GTFS helpers
 def parse_year_month_from_name(name: str) -> Optional[Tuple[int, int]]:
     m = re.search(r"(20\d{2})[-_ ]?(\d{2})", name)
     return (int(m.group(1)), int(m.group(2))) if m else None
-
 
 def latest_month_folder_by_name(area_dir: Path) -> Optional[Path]:
     month_dirs = [d for d in area_dir.iterdir() if d.is_dir()]
@@ -112,14 +136,12 @@ def latest_month_folder_by_name(area_dir: Path) -> Optional[Path]:
         return keyed[-1][1]
     return max(month_dirs, key=lambda p: p.stat().st_mtime)
 
-
 def unzip_to(zip_path: Path, target_dir: Path) -> Path:
     if not target_dir.exists():
         log(f"  • A descomprimir: {zip_path.name}")
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)
     return target_dir
-
 
 def find_gtfs_candidate(month_dir: Path, force_ref: bool = False) -> Optional[Path]:
     cands = []
@@ -147,15 +169,14 @@ def find_gtfs_candidate(month_dir: Path, force_ref: bool = False) -> Optional[Pa
     path, is_zip = sorted([(p, z) for (_, p, z) in cands], key=lambda x: x[0].name)[-1]
     return unzip_to(path, month_dir / path.stem) if is_zip else path
 
+# GTFS to Shapefiles (inalterado)
 
-# GTFS to Shapefiles (agora com 'pattern_id' garantido)-
 def _ensure_pattern_id_in_trips(trips_df: pd.DataFrame) -> pd.DataFrame:
     if "pattern_id" not in trips_df.columns:
         trips_df = trips_df.copy()
         trips_df["pattern_id"] = trips_df["trip_id"].astype(str).str.split("_").str[:3].str.join("_")
         log("      (Aviso) 'pattern_id' não existia em trips — inferido de trip_id.")
     return trips_df
-
 
 def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     log("    - A gerar shapefiles (versão COMPLETA)…")
@@ -176,7 +197,7 @@ def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     (shp_dir / "stops.shp").unlink(missing_ok=True)
     stops_gdf.to_file(shp_dir / "stops.shp")
 
-    # Stop_times
+    # stop_times
     st_merge = stop_times_df.merge(stops_df[["stop_id","stop_lon","stop_lat"]], on="stop_id", how="left")
     for c in ("stop_lat", "stop_lon"):
         st_merge[c] = pd.to_numeric(st_merge[c], errors="coerce")
@@ -193,7 +214,7 @@ def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     (shp_dir / "stop_times.shp").unlink(missing_ok=True)
     st_gdf.to_file(shp_dir / "stop_times.shp")
 
-    # Shapes_points
+    # shapes_points
     for c in ("shape_pt_lat","shape_pt_lon"):
         shapes_df[c] = pd.to_numeric(shapes_df[c], errors="coerce")
     shp_pts_gdf = gpd.GeoDataFrame(shapes_df, geometry=gpd.points_from_xy(shapes_df.shape_pt_lon, shapes_df.shape_pt_lat), crs="EPSG:4326")
@@ -207,7 +228,7 @@ def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     (shp_dir / "shapes_points.shp").unlink(missing_ok=True)
     shp_pts_gdf.to_file(shp_dir / "shapes_points.shp")
 
-    # Shapes_lines
+    # shapes_lines
     shapes_df["shape_pt_sequence_num"]   = pd.to_numeric(shapes_df.get("shape_pt_sequence"), errors="coerce")
     shapes_df["shape_dist_traveled_num"] = pd.to_numeric(shapes_df.get("shape_dist_traveled"), errors="coerce")
     shapes_df["shape_pt_lat"]            = pd.to_numeric(shapes_df["shape_pt_lat"], errors="coerce")
@@ -233,7 +254,7 @@ def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     (shp_dir / "shapes_lines.shp").unlink(missing_ok=True)
     lines_gdf.to_file(shp_dir / "shapes_lines.shp")
 
-    # Paragens_percursos
+    # paragens_percursos
     par_perc = stop_times_df[["trip_id","stop_id","stop_sequence"]].merge(
         trips_df[["trip_id","pattern_id"]], on="trip_id", how="left"
     ).merge(
@@ -250,14 +271,12 @@ def build_shapefiles_from_gtfs_complete(gtfs_dir: Path, shp_dir: Path) -> None:
     (shp_dir / "paragens_percursos.shp").unlink(missing_ok=True)
     par_gdf.to_file(shp_dir / "paragens_percursos.shp")
 
-
-# Cálculos
+# Cálculos (com leitura via GitHub)
 def concelho_field_name(cols: List[str]) -> str:
     for c in ["Concelho", "concelho", "Municipio", "Município", "NAME_2", "NAME"]:
         if c in cols:
             return c
     raise KeyError("Campo do concelho não encontrado no Concelhos.shp.")
-
 
 def calcular_totais(stops_gdf: gpd.GeoDataFrame, lines_gdf: gpd.GeoDataFrame):
     total_stops = stops_gdf.groupby("pattern_id").size().reset_index(name="stop_count")
@@ -269,14 +288,7 @@ def calcular_totais(stops_gdf: gpd.GeoDataFrame, lines_gdf: gpd.GeoDataFrame):
     )
     return total_stops, tot_ext
 
-
 def _recover_pattern_id_if_missing(gdf: gpd.GeoDataFrame, gtfs_dir: Path, key_cols: List[str]) -> gpd.GeoDataFrame:
-    """
-    Se 'pattern_id' não existir em gdf, tenta construir via trips.txt:
-    - Se tiver 'shape_id', usa mapping shape_id -> pattern_id.
-    - Senão, se tiver 'trip_id', usa mapping trip_id -> pattern_id.
-    key_cols: colunas existentes para tentar mapear (ordem de prioridade).
-    """
     if "pattern_id" in gdf.columns:
         return gdf
 
@@ -295,23 +307,24 @@ def _recover_pattern_id_if_missing(gdf: gpd.GeoDataFrame, gtfs_dir: Path, key_co
 
     raise KeyError("Não foi possível reconstruir 'pattern_id' a partir de trips.txt.")
 
-
 def correr_reparticao(shp_dir: Path):
-    # Paths dos inputs
-    conc_path = discover_input(CONCELHOS_FILENAME)
-    brg_path  = discover_input(BRIDGES_FILENAME)
+    # NEW: descarregar shapefiles diretamente do GitHub
+    log("    [DOWNLOAD] A obter 'Concelhos.*' do GitHub…")
+    conc_shp_path = _fetch_shapefile_to_temp("Concelhos")
 
-    log(f"    [USO] Concelhos: {conc_path}")
-    log(f"    [USO] Bridges  : {brg_path}")
+    log("    [DOWNLOAD] A obter 'bridges.*' do GitHub…")
+    brg_shp_path  = _fetch_shapefile_to_temp("bridges")
 
-    # Ler base
+    # Ler base GTFS shapefiles (locais, gerados nesta run)
     par_perc  = gpd.read_file(shp_dir / "paragens_percursos.shp")
     shapes_ln = gpd.read_file(shp_dir / "shapes_lines.shp")
-    conc      = gpd.read_file(conc_path)
-    brg       = gpd.read_file(brg_path)
 
-    # Garantir pattern_id (se faltar, recuperar via trips.txt)
-    gtfs_dir = shp_dir.parent  # pasta do GTFS
+    # Ler Concelhos e bridges a partir dos diretórios temporários (não persistentes)
+    conc      = gpd.read_file(conc_shp_path)
+    brg       = gpd.read_file(brg_shp_path)
+
+    # Garantir pattern_id
+    gtfs_dir = shp_dir.parent
     if "pattern_id" not in par_perc.columns:
         par_perc = _recover_pattern_id_if_missing(par_perc, gtfs_dir, key_cols=["trip_id", "shape_id"])
     if "pattern_id" not in shapes_ln.columns:
@@ -349,6 +362,7 @@ def correr_reparticao(shp_dir: Path):
     return ext, pivot_paragens
 
 # Planeamento
+
 def run_pipeline() -> None:
     for area in AREAS:
         area_dir = BASE / area
@@ -404,13 +418,15 @@ def run_pipeline() -> None:
 
             log(f"    ✓ Ficheiro final guardado: {out_path}")
 
+        except SystemExit as e:
+            # Repassa a mensagem tal como pediste (interrupção imediata)
+            raise
         except FileNotFoundError as e:
             log(f"    [ERRO INPUT] {e}")
         except KeyError as e:
             log(f"    [ERRO REPARTIÇÃO] {e} — verifique se 'pattern_id' foi corretamente escrito/recuperado.")
         except Exception as e:
             log(f"    [ERRO REPARTIÇÃO] {e}")
-
 
 if __name__ == "__main__":
     run_pipeline()
